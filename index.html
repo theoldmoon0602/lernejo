@@ -1,0 +1,260 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1"> 
+  <title>Lernejo</title>
+  <style>
+    * {
+      box-sizing: border-box;
+    }
+    #app {
+      max-width: 640px;
+      margin: 0 auto;
+    }
+    .menu>button {
+      width: 30%;
+      height: 4em;
+      display: inline-block;
+      border: 2px solid #ccc;
+      background: initial;
+      border-radius: 4px;
+      padding: 0.5em 1em;
+      margin: 0.5em;
+      cursor: pointer;
+    }
+    table {
+      width: 100%;
+    }
+    input[type=text] {
+      width: 100%;
+      padding: 0.5em;
+      border: 2px solid #000;
+      margin: 1em 0;
+    }
+  </style>
+</head>
+<body>
+  <div id="app">
+    <h1>Lernejo</h1>
+
+    <div class="menu">
+      <button @click="random()">ランダム10問</button>
+      <button @click="nigate()">苦手10問</button>
+      <button @click="hajimete()">未挑戦の10問</button>
+      <br>
+      <button @click="mode = 'edit';">問題の編集</button>
+      <button @click="clean()">学習データの削除</button>
+    </div>
+
+    <div v-if="mode == 'do'">
+      <form>
+        <p>{{ next_problem.question }} {{ next_problem | correct_rate }}</p>
+        <input type="text" v-model="answer">
+        <button @click.prevent="check(next_problem)">答える</button>
+        <button @click.prevent="pass(next_problem)" v-if="passed == false">パス</button>
+      </form>
+    </div>
+
+    <div v-if="mode == 'edit'">
+      <a href="db.json" download>問題をすべてダウンロード</a>
+      <table>
+        <tr>
+          <th>問題</th>
+          <th>答え</th>
+        </tr>
+        <tr>
+          <td><input type="text" v-model="new_question"></td>
+          <td><input type="text" v-model="new_correct"></td>
+          <td><button @click="add()">追加</button></td>
+        </tr>
+        <tr v-for="(q, id) in questions">
+          <td>{{ q.question }}</td>
+          <td>{{ q.correct }}</td>
+          <td><button @click="edit(id)">編集</button><button @click="remove(id)">削除</button></td>
+        </tr>
+      </table>
+    </div>
+  </div>
+  
+  <script src="https://jp.vuejs.org/js/vue.js"></script>
+  <script>
+          
+    function getRandomSubarray(arr, size) {
+      var shuffled = arr.slice(0), i = arr.length, temp, index;
+      while (i--) {
+        index = Math.floor((i + 1) * Math.random());
+        temp = shuffled[index];
+        shuffled[index] = shuffled[i];
+        shuffled[i] = temp;
+      }
+      return shuffled.slice(0, size);
+    }
+
+    function corrected(id) {
+      let v = localStorage.getItem(id);
+      if (v) {
+        v = JSON.parse(v);
+        v.correct += 1;
+        localStorage.setItem(id, JSON.stringify(v));
+      }
+      else {
+        localStorage.setItem(id, JSON.stringify({
+          correct: 1,
+          pass: 0,
+        }));
+      }
+    }
+    function passed(id) {
+      let v = localStorage.getItem(id);
+      if (v) {
+        v = JSON.parse(v);
+        v.pass += 1;
+        localStorage.setItem(id, JSON.stringify(v));
+      }
+      else {
+        localStorage.setItem(id, JSON.stringify({
+          correct: 0,
+          pass: 1,
+        }));
+      }
+    }
+    function correct_pass_times(id) {
+      let v = localStorage.getItem(id);
+      if (v) {
+        return JSON.parse(v);
+      }
+      return {correct: 0, pass: 0};
+    }
+
+    let vue = new Vue({
+      el: '#app',
+      data: {
+        mode: 'index',
+        new_question: '',
+        new_correct: '',
+        questions: [], 
+        problemset: [],
+        answer: '',
+        passed: false,
+      },
+      methods: {
+        add: function() {
+          let q = this.new_question;
+          let c = this.new_correct;
+          let query = 'api.php?query=add&q='+encodeURI(q)+'&c='+encodeURI(c);  
+          fetch(query)
+            .then(r => r.json())
+            .then(r => {
+              Vue.set(this.questions, r.id, {
+                question: q,
+                correct: c,
+              });
+            });
+          this.new_question = '';
+          this.new_correct = '';
+        },
+        remove: function(id) {
+          fetch('api.php?query=delete&id='+id)
+            .then(_ => {
+              Vue.delete(this.questions, id);
+            });
+        },
+        edit: function(id) {
+          let q = this.questions[id];
+          if (!q) { return; }
+          this.new_question = q.question;
+          this.new_correct = q.correct;
+          this.remove(id);
+        },
+        get: function() {
+          fetch('api.php?query=get')
+            .then(r => r.json())
+            .then(r => {
+              this.questions = r;
+            });
+        },
+        random: function() {
+          this.problemset = getRandomSubarray(Object.values(this.questions), 10);
+          this.mode = 'do';
+          if (this.problemset.length > 0) {
+            this.mode = 'do';
+          }
+        },
+        nigate: function() {
+          let arr = [];
+          for (let k in this.questions) {
+            if (! this.questions.hasOwnProperty(k)) { continue; }
+            let q = this.questions[k];
+            let t = correct_pass_times(q.question);
+            if (t.pass > t.correct) {
+              arr.push(q);
+            }
+          }
+          if (arr.length > 0) {
+            this.problemset = getRandomSubarray(arr, 10);
+            this.mode = 'do';
+          }
+        },
+        hajimete: function() {
+          let arr = [];
+          for (let k in this.questions) {
+            let q = this.questions[k];
+            let t = correct_pass_times(q.question);
+            if (t.correct == 0 && t.pass == 0) {
+              arr.push(q);
+            }
+          }
+          if (arr.length > 0) {
+            this.problemset = getRandomSubarray(arr, 10);
+            this.mode = 'do';
+          }
+        },
+        check: function(problem) {
+          if (this.answer == problem.correct || this.passed) {
+            this.answer = '';
+            if (! this.passed) {
+              corrected(problem.question);
+            }
+            this.passed = false;
+
+            this.problemset.shift();
+            if (this.problemset.length == 0) {
+              this.mode = 'index';
+            }
+          }
+        },
+        pass: function(problem) {
+          if (this.passed === false) {
+          this.answer = problem.correct;
+          this.passed = true;
+          passed(problem.question);
+          }
+        },
+        clean: function() {
+          if (window.confirm("本当に？") === true) {
+            localStorage.clear();
+          }
+        },
+      },
+      mounted: function() {
+        this.get();
+      },
+      computed: {
+        next_problem: function() {
+          return this.problemset[0];
+        },
+      },
+      filters: {
+        correct_rate: function(problem) {
+          let t = correct_pass_times(problem.question);
+          if (t.pass == 0 && t.correct == 0) {
+            return '初挑戦';
+          }
+          return '正解率' + t.correct + '/' + (t.correct + t.pass);
+        },
+      },
+    });
+  </script>
+</body>
+</html>
